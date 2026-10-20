@@ -39,15 +39,15 @@
  */
 
 //Define a version string of your firmware here
-#define VER 1.01.R
+#define VER 1.01.M1
 
 /* Entries must be ordered as follows:
    1. Saveable parameters (id != 0)
    2. Temporary parameters (id = 0)
    3. Display values
  */
-//Next param id (increase when adding new parameter!): 24
-//Next value Id: 2051
+//Next param id (increase when adding new parameter!): 26
+//Next value Id: 2053
 /*              category     name         unit       min     max     default id */
 #define PARAM_LIST \
     PARAM_ENTRY(CAT_CHARGER, pacspnt,     "kW",      0,      11,     11,     2  ) \
@@ -63,6 +63,8 @@
     PARAM_ENTRY(CAT_CHARGER, idckp,       "",        0,      10000,  1,      12  ) \
     PARAM_ENTRY(CAT_CHARGER, idcki,       "",        0,      10000,  10,     13  ) \
     PARAM_ENTRY(CAT_CHARGER, activate,    DEVS,      0,      3,      3,      14  ) \
+    PARAM_ENTRY(CAT_CHARGER, pilotlim,    PILOTLIM,  0,      2,      1,      24  ) \
+    PARAM_ENTRY(CAT_CHARGER, pilotinv,    OFFON,     0,      1,      0,      25  ) \
     PARAM_ENTRY(CAT_DCDC,    udcdc,       "V",       12,     15,     14,     15  ) \
     PARAM_ENTRY(CAT_DCDC,    PreChT,      "sec",     1,      10,     3,      23  ) \
     PARAM_ENTRY(CAT_GEN,     Alerts,      "",        0,      9,      0,      16  ) \
@@ -77,6 +79,8 @@
     VALUE_ENTRY(hwaclim,     "A",     2007 ) \
     VALUE_ENTRY(cablelim,    "A",     2008 ) \
     VALUE_ENTRY(evselim,     "A",     2009 ) \
+    VALUE_ENTRY(pilotduty,   "%",     2051 ) \
+    VALUE_ENTRY(aclimeff,    "A",     2052 ) \
     VALUE_ENTRY(powerac,     "kW",    2010 ) \
     VALUE_ENTRY(powerdcdc,   "W",     2011 ) \
     VALUE_ENTRY(udc,         "V",     2012 ) \
@@ -123,6 +127,7 @@
 #define CAT_CHARGER  "Charger"
 #define CAT_COMM     "Communication"
 #define DEVS         "0=None, 1=Charger, 2=DC-DC, 3=Both"
+#define PILOTLIM     "0=Off, 1=IfPresent, 2=Required"
 #define MODELS       "0=EU, 1=US"
 #define MODCODES     "45=EU, 93=US"
 #define CAT_TEST     "Testing"

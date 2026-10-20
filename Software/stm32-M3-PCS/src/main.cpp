@@ -46,6 +46,18 @@ static uint16_t ChgPower=0;
 static uint8_t pwrDntmr=10;
 static bool ZeroPower=false;
 
+//Convert a control pilot duty cycle (%) into the EVSE current limit (A)
+//according to IEC 61851-1. Returns 0 where the duty cycle allows no charging.
+static float PilotDutyToCurrent(float duty)
+{
+   if (duty < 8.0f)  return 0;                      //<8%: no analogue limit (5% = digital comms)
+   if (duty < 10.0f) return 6.0f;                   //8..10%: 6A
+   if (duty <= 85.0f) return duty * 0.6f;           //10..85%: 0.6A per %
+   if (duty <= 96.0f) return (duty - 64.0f) * 2.5f; //85..96%: 2.5A per % above 64%
+   if (duty <= 97.0f) return 80.0f;                 //96..97%: 80A
+   return 0;                                        //>97%: no charging allowed
+}
+
 static void EvseRead()
 {
    const int threshProxType1 = 2200;
@@ -56,18 +68,31 @@ static void EvseRead()
    const int thresh63A = 1000;
    int val = AnaIn::cablelim.Get();
 
+   //TIM3 runs in PWM input mode at 1MHz: IC1 captures the period and IC2 the
+   //high time, both in microseconds. CC2IF is only set if a falling edge was
+   //seen since the last read, i.e. a PWM signal is present.
    if (timer_get_flag(TIM3, TIM_SR_CC2IF))
    {
-      //The relationship between duty cycle and maximum current is linear
-      //until 85% = 51A. Above that it becomes non-linear but that is not
-      //relevant for our 10kW charger.
-      float evselim = timer_get_ic_value(TIM3, TIM_IC2) / 10;
-      evselim *= 0.666666f;
-      Param::SetFloat(Param::evselim, evselim);
+      uint32_t period = timer_get_ic_value(TIM3, TIM_IC1);
+      uint32_t high = timer_get_ic_value(TIM3, TIM_IC2);
+      float duty = 0;
+
+      //Only accept a plausible 1kHz pilot (IEC 61851-1 allows +/-2%)
+      if (period > 900 && period < 1100 && high <= period)
+      {
+         duty = (100.0f * high) / period;
+         //Allow for an inverting source, e.g. the ZombieVerter's CpSpoof
+         //output driven through a low side switch.
+         if (Param::GetBool(Param::pilotinv)) duty = 100.0f - duty;
+      }
+
+      Param::SetFloat(Param::pilotduty, duty);
+      Param::SetFloat(Param::evselim, PilotDutyToCurrent(duty));
    }
    else
    {
-      //If no PWM detected, set limit to 0
+      //If no PWM detected, set duty and limit to 0
+      Param::SetInt(Param::pilotduty, 0);
       Param::SetInt(Param::evselim, 0);
    }
 
@@ -185,14 +210,15 @@ static bool CheckTimeout()
 static bool CheckDelay()
 {
    uint32_t now = rtc_get_counter_val();
-   uint32_t start = Param::GetInt(Param::timedly) * 60;
+   //Signed: timedly=-1 ("no delay", the default) must not wrap to ~136 years
+   int32_t start = Param::GetInt(Param::timedly) * 60;
    if(start<60)
    {
        return 1;
    }
    else
    {
-       return start > 0 && (now - startTime) > start;
+       return (now - startTime) > (uint32_t)start;
    }
 
 }
@@ -207,6 +233,42 @@ static void PCSEnable()
  bool Drv_en = DigIo::d2_in.Get();
  Param::SetInt(Param::Drive_En, Drv_en);
 
+}
+
+//Work out the AC current limit sent to the PCS (0x13D and 0x23D).
+//pilotlim=Off:       user limit iaclim only (original V1.01 behaviour)
+//pilotlim=IfPresent: also limit to the EVSE pilot when a pilot PWM is seen,
+//                    and to the cable limit when a plug is detected
+//pilotlim=Required:  as IfPresent, but no valid pilot means 0A. Use this when
+//                    the pilot comes from another module, e.g. CpSpoof, so a
+//                    lost signal can never fall back to the full iaclim.
+static void CalcAcCurrentLimit()
+{
+   float limit = Param::GetFloat(Param::iaclim);
+   int mode = Param::GetInt(Param::pilotlim);
+
+   if (mode != 0)
+   {
+      bool pilotPresent = Param::GetFloat(Param::pilotduty) > 0;
+
+      if (pilotPresent)
+      {
+         float evseLimit = Param::GetFloat(Param::evselim);
+         if (evseLimit < limit) limit = evseLimit;
+      }
+      else if (mode == 2)
+      {
+         limit = 0;
+      }
+
+      if (Param::GetBool(Param::proximity))
+      {
+         float cableLimit = Param::GetFloat(Param::cablelim);
+         if (cableLimit > 0 && cableLimit < limit) limit = cableLimit;
+      }
+   }
+
+   Param::SetFloat(Param::aclimeff, limit);
 }
 
 
@@ -240,6 +302,9 @@ static void ChargerStateMachine()
       case WAITSTART:
          if (CheckDelay()) state = ENABLE;
          if (CheckUnplugged()) state = OFF;
+         //Enable withdrawn before we started (needed for inputype=Manual,
+         //where CheckUnplugged() is never true)
+         if (!Param::GetBool(Param::enable)) state = OFF;
          break;
       case ENABLE:
          DigIo::hvena_out.Set();
@@ -250,6 +315,9 @@ static void ChargerStateMachine()
          CAN_Enable=true;
          state = ACTIVATE;
          }
+         //Enable withdrawn while waiting for the VCU to precharge: shut down
+         //cleanly via STOP rather than carrying on to activate the PCS.
+         if (!Param::GetBool(Param::enable)) state = STOP;
          break;
       case DRIVE:
          ZeroPower=true;//charger powe =0 in drive.
@@ -309,6 +377,12 @@ static void ChargerStateMachine()
          DisableAll();
          Param::SetInt(Param::opmode, 0);
          if (CheckUnplugged()) state = OFF;
+         //Also return to OFF once the enable input is removed. Without this,
+         //inputype=Manual stays in STOP until a power cycle, which blocks
+         //both a new charge and the DRIVE (DC/DC only) state.
+         //If charging stopped on udclim/timelim with enable still high we
+         //stay here, so the charger does not restart in a loop.
+         if (!Param::GetBool(Param::enable)) state = OFF;
          }
 
          break;
@@ -374,7 +448,7 @@ static void Ms100Task(void)
    EvseRead();
    //ResetValuesInOffMode();
    PCSEnable();
-  // CalcAcCurrentLimit();
+   CalcAcCurrentLimit();
    ChargerStateMachine();
    PCSCan::AlertHandler();
 

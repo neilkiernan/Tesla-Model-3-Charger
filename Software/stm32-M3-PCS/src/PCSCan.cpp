@@ -245,9 +245,19 @@ void PCSCan::handle76C(uint32_t data[2])  //PCS Debug output
 ///////////////////////////////////////////////////////////////////////////////////////
 
 
+//AC current limit for the PCS in 0.5A steps, from the effective limit
+//worked out in main.cpp (iaclim, optionally reduced by pilot/cable limits).
+static uint8_t GetACILim()
+{
+   int halfAmps = (int)(Param::GetFloat(Param::aclimeff) * 2.0f);
+   if (halfAmps < 0) halfAmps = 0;
+   if (halfAmps > 255) halfAmps = 255;
+   return (uint8_t)halfAmps;
+}
+
 void PCSCan::Msg13D()//Required by post 2020 firmwares. Mirrors some content in 0x23D.
 {
-   ACILim=Param::GetInt(Param::iaclim)*2;
+   ACILim=GetACILim();
    uint8_t bytes[6];
   if(!DigIo::chena_out.Get()) bytes[0]=0x05;//Set charger enabled.
   if(DigIo::chena_out.Get()) bytes[0]=0x0A;//Set charger disabled
@@ -337,7 +347,7 @@ void PCSCan::Msg23D()
 {
    //CP Charge Status
    uint8_t bytes[4];
-   ACILim=Param::GetInt(Param::iaclim)*2;
+   ACILim=GetACILim();
   if(!DigIo::chena_out.Get()) bytes[0]=0x05;//Set charger enabled.
   if(DigIo::chena_out.Get()) bytes[0]=0x0A;//Set charger disabled
    bytes[1]=ACILim; //charge current limit. gain 0.5. 0x40 = 64 dec =32A. Populate AC lim in here.
