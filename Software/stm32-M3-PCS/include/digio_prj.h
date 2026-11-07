@@ -12,8 +12,11 @@
     DIG_IO_ENTRY(enable_in,   GPIOB, GPIO3,  PinMode::INPUT_FLT)   \
     DIG_IO_ENTRY(d2_in,       GPIOB, GPIO4,  PinMode::INPUT_FLT)   \
     DIG_IO_ENTRY(led_out,     GPIOC, GPIO13, PinMode::OUTPUT)      \
-    DIG_IO_ENTRY(hvena_out,   GPIOA, GPIO2,  PinMode::OUTPUT)      \
-    DIG_IO_ENTRY(acpres_out,  GPIOA, GPIO3,  PinMode::OUTPUT)      \
+    /* HV request moved from OUT1 (PA2/IC7) to OUT2 (PA3/IC6): PA2 suspected */ \
+    /* damaged. acpres_out is unused here; left on PA2 as a floating input so */ \
+    /* the firmware never drives that pin. */                                  \
+    DIG_IO_ENTRY(hvena_out,   GPIOA, GPIO3,  PinMode::OUTPUT)      \
+    DIG_IO_ENTRY(acpres_out,  GPIOA, GPIO2,  PinMode::INPUT_FLT)   \
     DIG_IO_ENTRY(evseact_out, GPIOB, GPIO15, PinMode::OUTPUT)      \
     DIG_IO_ENTRY(pcsena_out,  GPIOB, GPIO14, PinMode::OUTPUT)      \
     DIG_IO_ENTRY(dcdcena_out, GPIOB, GPIO13, PinMode::OUTPUT)      \
